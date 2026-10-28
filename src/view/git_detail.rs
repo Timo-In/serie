@@ -490,7 +490,7 @@ fn files_title(commit: &Commit, theme: &ColorTheme) -> Line<'static> {
         Span::styled(" Files · ", Style::default().fg(theme.fg)),
         Span::styled(
             commit.commit_hash.as_short_hash().to_string(),
-            Style::default().fg(theme.list_hash_fg),
+            Style::default().fg(ratatui::style::Color::Rgb(224, 108, 118)),
         ),
         Span::styled(
             format!(" {} ", commit.subject),
@@ -611,7 +611,7 @@ mod tests {
             ..Commit::default()
         };
         let title = files_title(&commit, &theme);
-        assert_eq!(title.spans[1].style.fg, Some(Color::Red));
+        assert_eq!(title.spans[1].style.fg, Some(Color::Rgb(224, 108, 118)));
         assert_eq!(title.spans[2].style.fg, Some(Color::Blue));
         let footer = footer_line(&[("/", "find file")], &theme);
         assert_eq!(footer.spans[1].style.fg, Some(Color::Green));
