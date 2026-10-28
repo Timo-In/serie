@@ -91,8 +91,9 @@ To release:
 1. Set the package version in `Cargo.toml` and `Cargo.lock` to a fork version,
    such as `0.10.1-timo`. All fork release versions end in `-timo`; use a new
    version for each release instead of replacing an existing tag.
-2. Push `timo/dev` and merge its pull request into `timo/main` with **Create a
-   merge commit** after `cargo test` passes. Fetch the updated stable branch locally.
+2. Push `timo/dev`, then [create a PR within this fork](https://github.com/Timo-In/serie/compare/timo%2Fmain...timo%2Fdev?expand=1)
+   or run `gh pr create --repo Timo-In/serie --base timo/main --head timo/dev` to open the same PR.
+   Choose **Create a merge commit** after `cargo test` passes, then fetch the updated stable branch locally.
 3. Create and push an annotated tag matching the package version:
 
    ```sh
