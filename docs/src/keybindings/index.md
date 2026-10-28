@@ -38,7 +38,46 @@ The default key bindings can be overridden.
 | <kbd>c/C</kbd>                       | Copy commit short/full hash                        | `short_copy` `full_copy`                     |
 | <kbd>d</kbd>                         | Toggle custom user command view                    | `user_command_1`                             |
 
-#### Commit Detail
+#### Git Commit Detail
+
+Press Enter on a commit to open its changed-file tree and patch side by side.
+The original commit detail implementation is retained separately.
+
+| Key | Description | Corresponding keybind |
+| --- | --- | --- |
+| <kbd>Tab</kbd> / <kbd>Shift-Tab</kbd> | Toggle full-screen patch / file tree | `ref_list` / `focus_previous` |
+| <kbd>Enter</kbd> | Expand/collapse the selected directory or open the selected file in the editor | `confirm` |
+| <kbd>Esc</kbd> / <kbd>Backspace</kbd> | Return from full-screen patch to the file tree, or back to the commit list | `cancel` / `close` |
+| <kbd>e</kbd> | Edit the selected working-tree file (file tree only) | `edit_file` |
+| <kbd>j/k</kbd> / <kbd>Down/Up</kbd> | Select a file or scroll the patch | `navigate_down` / `navigate_up` |
+| <kbd>h/l</kbd> / <kbd>Left/Right</kbd> | Collapse/expand a directory or scroll the patch horizontally | `navigate_left` / `navigate_right` |
+| <kbd>Ctrl-f/b</kbd> / <kbd>PageDown/PageUp</kbd> | Move one page | `page_down` / `page_up` |
+| <kbd>Ctrl-d/u</kbd> | Move half a page | `half_page_down` / `half_page_up` |
+| <kbd>g/G</kbd> | Go to top/bottom | `go_to_top` / `go_to_bottom` |
+| <kbd>J/K</kbd> | Select older/newer commit | `select_down` / `select_up` |
+| <kbd>Alt-j</kbd> / <kbd>Alt-Down</kbd> | Select the first parent commit | `go_to_parent` |
+| <kbd>R</kbd> | Refresh | `refresh` |
+| <kbd>m</kbd> | Toggle commit mark | `mark_toggle` |
+| <kbd>c/C</kbd> | Copy commit short/full hash | `short_copy` / `full_copy` |
+| <kbd>d</kbd> | Open the custom user command view | `user_command_1` |
+
+Patches compare against the first parent; root commits compare against an empty
+tree. Patches larger than 2 MiB are truncated for display. Binary changes show
+Git's binary-file summary.
+
+Tab shows only the selected file's patch at full width. Enter and e have no
+effect in this full-screen view. Tab or Esc restores the file tree.
+
+In the file tree, Enter on a directory toggles its children; Enter on a file
+and e both open the working-tree file for editing. Its contents may differ from
+the selected historical commit. Missing files, directories, symlinks, and bare
+repositories report an error instead of creating a file. Set `VISUAL` or
+`EDITOR` to a terminal editor such as `nvim` or `vim` (in that order of
+precedence); the fallback is `vi`. Editor arguments are supported, for example
+`EDITOR='nvim -n'`. Serie pauses while the editor runs in the same terminal,
+then restores the selected file and panel when the editor exits.
+
+#### Original Commit Detail
 
 | Key                                  | Description                     | Corresponding keybind           |
 | ------------------------------------ | ------------------------------- | ------------------------------- |

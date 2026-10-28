@@ -5,11 +5,11 @@ use ratatui::{crossterm::event::KeyEvent, layout::Rect, Frame};
 use crate::{
     app::AppContext,
     event::{Sender, UserEventWithCount},
-    git::{Commit, CommitHash, FileChange, Ref},
+    git::{Commit, CommitHash, FileChange, Ref, Repository},
     search::SearchOptions,
     view::{
-        detail::DetailView, help::HelpView, list::ListView, refs::RefsView,
-        user_command::UserCommandView,
+        detail::DetailView, git_detail::GitDetailView, help::HelpView, list::ListView,
+        refs::RefsView, user_command::UserCommandView,
     },
     widget::commit_list::{CommitListState, SearchRefreshContext},
 };
@@ -20,6 +20,7 @@ pub enum View<'a> {
     Default, // dummy variant to make #[default] work
     List(Box<ListView<'a>>),
     Detail(Box<DetailView<'a>>),
+    GitDetail(Box<GitDetailView<'a>>),
     UserCommand(Box<UserCommandView<'a>>),
     Refs(Box<RefsView<'a>>),
     Help(Box<HelpView<'a>>),
@@ -31,6 +32,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.handle_event(event_with_count, key_event),
             View::Detail(view) => view.handle_event(event_with_count, key_event),
+            View::GitDetail(view) => view.handle_event(event_with_count, key_event),
             View::UserCommand(view) => view.handle_event(event_with_count, key_event),
             View::Refs(view) => view.handle_event(event_with_count, key_event),
             View::Help(view) => view.handle_event(event_with_count, key_event),
@@ -42,6 +44,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.render(f, area),
             View::Detail(view) => view.render(f, area),
+            View::GitDetail(view) => view.render(f, area),
             View::UserCommand(view) => view.render(f, area),
             View::Refs(view) => view.render(f, area),
             View::Help(view) => view.render(f, area),
@@ -53,6 +56,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.update_layout(area),
             View::Detail(view) => view.update_layout(area),
+            View::GitDetail(_) => {}
             View::UserCommand(view) => view.update_layout(area),
             View::Refs(view) => view.update_layout(area),
             View::Help(_) => {}
@@ -64,6 +68,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.prepare_graph_uploads(),
             View::Detail(view) => view.prepare_graph_uploads(),
+            View::GitDetail(_) => {}
             View::UserCommand(view) => view.prepare_graph_uploads(),
             View::Refs(view) => view.prepare_graph_uploads(),
             View::Help(_) => {}
@@ -75,6 +80,7 @@ impl<'a> View<'a> {
             View::Default => Vec::new(),
             View::List(view) => view.drain_pending_graph_uploads(),
             View::Detail(view) => view.drain_pending_graph_uploads(),
+            View::GitDetail(_) => Vec::new(),
             View::UserCommand(view) => view.drain_pending_graph_uploads(),
             View::Refs(view) => view.drain_pending_graph_uploads(),
             View::Help(_) => Vec::new(),
@@ -86,6 +92,7 @@ impl<'a> View<'a> {
             View::Default => Vec::new(),
             View::List(view) => view.graph_image_ids_sorted(),
             View::Detail(view) => view.graph_image_ids_sorted(),
+            View::GitDetail(view) => view.graph_image_ids_sorted(),
             View::UserCommand(view) => view.graph_image_ids_sorted(),
             View::Refs(view) => view.graph_image_ids_sorted(),
             View::Help(view) => view.graph_image_ids_sorted(),
@@ -96,6 +103,7 @@ impl<'a> View<'a> {
         match self {
             View::Default | View::List(_) | View::Refs(_) => None,
             View::Detail(view) => Some(view.image_clear_area(area)),
+            View::GitDetail(_) => Some(area),
             View::UserCommand(view) => Some(view.image_clear_area(area)),
             View::Help(_) => Some(area),
         }
@@ -122,6 +130,20 @@ impl<'a> View<'a> {
             commit,
             changes,
             refs,
+            ctx,
+            tx,
+        )))
+    }
+
+    pub fn of_git_detail(
+        commit_list_state: CommitListState<'a>,
+        repository: &'a Repository,
+        ctx: Rc<AppContext>,
+        tx: Sender,
+    ) -> Self {
+        View::GitDetail(Box::new(GitDetailView::new(
+            commit_list_state,
+            repository,
             ctx,
             tx,
         )))
@@ -161,6 +183,7 @@ impl<'a> View<'a> {
             View::Default => {}
             View::List(view) => view.refresh(),
             View::Detail(view) => view.refresh(),
+            View::GitDetail(view) => view.refresh(),
             View::UserCommand(view) => view.refresh(),
             View::Refs(view) => view.refresh(),
             View::Help(_) => {}
@@ -174,6 +197,9 @@ pub enum RefreshViewContext {
         list_context: ListRefreshViewContext,
     },
     Detail {
+        list_context: ListRefreshViewContext,
+    },
+    GitDetail {
         list_context: ListRefreshViewContext,
     },
     UserCommand {
@@ -191,6 +217,7 @@ impl RefreshViewContext {
         match self {
             RefreshViewContext::List { list_context }
             | RefreshViewContext::Detail { list_context }
+            | RefreshViewContext::GitDetail { list_context }
             | RefreshViewContext::UserCommand { list_context, .. }
             | RefreshViewContext::Refs { list_context, .. } => list_context,
         }

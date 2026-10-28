@@ -160,7 +160,7 @@ impl<'a> ListView<'a> {
                     self.clear_search_query();
                 }
                 UserEvent::Confirm => {
-                    self.tx.send(AppEvent::OpenDetail);
+                    self.tx.send(AppEvent::OpenGitDetail);
                 }
                 UserEvent::RefList => {
                     self.tx.send(AppEvent::OpenRefs);
