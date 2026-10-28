@@ -283,6 +283,27 @@ fn build_lines(
     detail_helps.extend(user_command_help_items.clone());
     let (detail_key_lines, detail_value_lines) = build_block_lines("Commit Detail:", detail_helps, color_theme, keybind);
 
+    let git_detail_helps = vec![
+        (vec![UserEvent::Search], "Search filenames (ignore-case substring)".into()),
+        (vec![UserEvent::GoToNext, UserEvent::GoToPrevious], "Next/previous matching file".into()),
+        (vec![UserEvent::RefList, UserEvent::FocusPrevious], "Toggle full patch / file tree".into()),
+        (vec![UserEvent::Confirm], "Confirm search, or expand directory / edit file".into()),
+        (vec![UserEvent::Cancel], "Cancel/clear search, or return to file tree / commit list".into()),
+        (vec![UserEvent::Close], "Return to file tree or commit list (Backspace edits search input)".into()),
+        (vec![UserEvent::EditFile], "Edit working-tree file in terminal editor (file tree only)".into()),
+        (vec![UserEvent::NavigateDown, UserEvent::NavigateUp], "Select file or scroll patch".into()),
+        (vec![UserEvent::NavigateRight, UserEvent::NavigateLeft], "Expand/collapse directory or scroll patch horizontally".into()),
+        (vec![UserEvent::PageDown, UserEvent::PageUp], "Move one page".into()),
+        (vec![UserEvent::HalfPageDown, UserEvent::HalfPageUp], "Move half a page".into()),
+        (vec![UserEvent::GoToTop, UserEvent::GoToBottom], "Go to top/bottom".into()),
+        (vec![UserEvent::SelectDown, UserEvent::SelectUp], "Select older/newer commit".into()),
+        (vec![UserEvent::GoToParent], "Select first parent commit".into()),
+        (vec![UserEvent::Refresh], "Refresh".into()),
+        (vec![UserEvent::MarkToggle], "Toggle commit mark".into()),
+        (vec![UserEvent::ShortCopy, UserEvent::FullCopy], "Copy commit short/full hash".into()),
+    ];
+    let (git_detail_key_lines, git_detail_value_lines) = build_block_lines("Git Commit Detail:", git_detail_helps, color_theme, keybind);
+
     let refs_helps = vec![
         (vec![UserEvent::Cancel, UserEvent::Close, UserEvent::RefList], "Close refs list".into()),
         (vec![UserEvent::NavigateDown, UserEvent::SelectDown], "Move down".into()),
@@ -321,6 +342,7 @@ fn build_lines(
         help_key_lines,
         list_key_lines,
         detail_key_lines,
+        git_detail_key_lines,
         refs_key_lines,
         user_command_key_lines,
     ]);
@@ -329,6 +351,7 @@ fn build_lines(
         help_value_lines,
         list_value_lines,
         detail_value_lines,
+        git_detail_value_lines,
         refs_value_lines,
         user_command_value_lines,
     ]);

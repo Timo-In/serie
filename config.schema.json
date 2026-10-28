@@ -705,6 +705,12 @@
         "ref_list": {
           "$ref": "#/definitions/keybindArray"
         },
+        "focus_previous": {
+          "$ref": "#/definitions/keybindArray"
+        },
+        "edit_file": {
+          "$ref": "#/definitions/keybindArray"
+        },
         "search": {
           "$ref": "#/definitions/keybindArray"
         },

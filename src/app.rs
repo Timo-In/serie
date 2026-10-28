@@ -224,10 +224,10 @@ impl App<'_> {
                             self.app_status.numeric_prefix.clear();
                         }
                         None => {
-                            if let StatusLine::Input { .. } = self.app_status.status_line {
-                                // In input mode, pass all key events to the view
-                                // fixme: currently, the only thing that processes key_event is searching the list,
-                                //        so this probably works, but it's not the right process...
+                            if matches!(self.app_status.status_line, StatusLine::Input { .. })
+                                || matches!(&self.view, View::GitDetail(view) if view.is_searching())
+                            {
+                                // Input can begin before its queued status-line event is processed.
                                 self.app_status.numeric_prefix.clear();
                                 self.view.handle_event(
                                     UserEventWithCount::from_event(UserEvent::Unknown),
@@ -257,6 +257,18 @@ impl App<'_> {
                 }
                 AppEvent::CloseDetail => {
                     self.close_detail();
+                    self.app_status.pending_clear = PendingClear::Screen;
+                }
+                AppEvent::OpenGitDetail => {
+                    self.open_git_detail();
+                    self.app_status.pending_clear = PendingClear::Screen;
+                }
+                AppEvent::CloseGitDetail => {
+                    self.close_git_detail();
+                    self.app_status.pending_clear = PendingClear::Screen;
+                }
+                AppEvent::OpenGitEditor => {
+                    self.open_git_editor();
                     self.app_status.pending_clear = PendingClear::Screen;
                 }
                 AppEvent::OpenUserCommand(n) => {
@@ -537,6 +549,51 @@ impl App<'_> {
         }
     }
 
+    fn open_git_detail(&mut self) {
+        let commit_list_state = match &mut self.view {
+            View::List(view) => view.take_list_state(),
+            View::UserCommand(view) => view.take_list_state(),
+            _ => return,
+        };
+        self.view = View::of_git_detail(
+            commit_list_state,
+            self.repository,
+            self.ctx.clone(),
+            self.ec.sender(),
+        );
+    }
+
+    fn close_git_detail(&mut self) {
+        if let View::GitDetail(view) = &mut self.view {
+            let state = view.take_list_state();
+            self.view = View::of_list(state, self.ctx.clone(), self.ec.sender());
+        }
+    }
+
+    fn open_git_editor(&mut self) {
+        let View::GitDetail(view) = &self.view else {
+            return;
+        };
+        let Some(file) = view.selected_file() else {
+            return;
+        };
+        let result = (|| -> Result<(), String> {
+            let path = self.repository.detail_worktree_file(file)?;
+            let mut command = self.repository.detail_editor_command(&path);
+            self.ec.suspend();
+            let status = command.status();
+            self.ec.resume();
+            let status = status.map_err(|e| format!("Failed to start editor: {e}"))?;
+            if !status.success() {
+                return Err(format!("Editor exited with {status}"));
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.ec.send(AppEvent::NotifyError(error));
+        }
+    }
+
     fn open_user_command(&mut self, user_command_number: usize) {
         match extract_user_command_by_number(user_command_number, &self.ctx).map(|c| &c.r#type) {
             Ok(UserCommandType::Inline) => {
@@ -560,6 +617,7 @@ impl App<'_> {
     fn open_user_command_inline(&mut self, user_command_number: usize) {
         let commit_list_state = match self.view {
             View::List(ref mut view) => view.as_list_state(),
+            View::GitDetail(ref mut view) => view.as_list_state(),
             View::Detail(ref mut view) => view.as_list_state(),
             View::UserCommand(ref mut view) => view.as_list_state(),
             _ => return,
@@ -578,6 +636,7 @@ impl App<'_> {
                 // take list state only when the command execution is successful, to avoid losing the state when the command fails
                 let commit_list_state = match self.view {
                     View::List(ref mut view) => view.take_list_state(),
+                    View::GitDetail(ref mut view) => view.take_list_state(),
                     View::Detail(ref mut view) => view.take_list_state(),
                     View::UserCommand(ref mut view) => view.take_list_state(),
                     _ => return,
@@ -599,6 +658,7 @@ impl App<'_> {
     fn open_user_command_silent(&mut self, user_command_number: usize) {
         let commit_list_state = match self.view {
             View::List(ref mut view) => view.as_list_state(),
+            View::GitDetail(ref mut view) => view.as_list_state(),
             View::Detail(ref mut view) => view.as_list_state(),
             View::UserCommand(ref mut view) => view.as_list_state(),
             _ => return,
@@ -627,6 +687,7 @@ impl App<'_> {
     fn open_user_command_suspend(&mut self, user_command_number: usize) {
         let commit_list_state = match self.view {
             View::List(ref mut view) => view.as_list_state(),
+            View::GitDetail(ref mut view) => view.as_list_state(),
             View::Detail(ref mut view) => view.as_list_state(),
             View::UserCommand(ref mut view) => view.as_list_state(),
             _ => return,
@@ -694,7 +755,9 @@ impl App<'_> {
     }
 
     fn select_older_commit(&mut self) {
-        if let View::Detail(ref mut view) = self.view {
+        if let View::GitDetail(ref mut view) = self.view {
+            view.select_commit(UserEvent::SelectDown);
+        } else if let View::Detail(ref mut view) = self.view {
             view.select_older_commit(self.repository);
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_older_commit(
@@ -706,7 +769,9 @@ impl App<'_> {
     }
 
     fn select_newer_commit(&mut self) {
-        if let View::Detail(ref mut view) = self.view {
+        if let View::GitDetail(ref mut view) = self.view {
+            view.select_commit(UserEvent::SelectUp);
+        } else if let View::Detail(ref mut view) = self.view {
             view.select_newer_commit(self.repository);
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_newer_commit(
@@ -718,7 +783,9 @@ impl App<'_> {
     }
 
     fn select_parent_commit(&mut self) {
-        if let View::Detail(ref mut view) = self.view {
+        if let View::GitDetail(ref mut view) = self.view {
+            view.select_commit(UserEvent::GoToParent);
+        } else if let View::Detail(ref mut view) = self.view {
             view.select_parent_commit(self.repository);
         } else if let View::UserCommand(ref mut view) = self.view {
             view.select_parent_commit(
@@ -737,6 +804,9 @@ impl App<'_> {
             RefreshViewContext::List { .. } => {}
             RefreshViewContext::Detail { .. } => {
                 self.open_detail();
+            }
+            RefreshViewContext::GitDetail { .. } => {
+                self.open_git_detail();
             }
             RefreshViewContext::UserCommand {
                 user_command_context,

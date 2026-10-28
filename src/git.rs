@@ -10,6 +10,8 @@ use rustc_hash::FxHashMap;
 
 use crate::Result;
 
+pub mod detail;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CommitHash(String);
 
