@@ -17,6 +17,7 @@ use crate::{
 #[derive(Debug, Clone)]
 struct Node {
     path: PathBuf,
+    name: String,
     depth: usize,
     file: Option<usize>,
     expanded: bool,
@@ -73,10 +74,24 @@ impl FileTreeState {
                 .cmp(&b.children.is_empty())
                 .then(a_name.cmp(b_name))
         });
-        for (name, child) in children {
-            let path = parent.join(name);
+        for (name, mut child) in children {
+            let mut path = parent.join(name);
+            // Compact directory-only chains; keep files and branch points as rows.
+            while child.file.is_none()
+                && child.children.len() == 1
+                && child
+                    .children
+                    .values()
+                    .next()
+                    .is_some_and(|next| next.file.is_none())
+            {
+                let (name, next) = child.children.pop_first().unwrap();
+                path.push(name);
+                child = next;
+            }
             self.nodes.push(Node {
                 path: path.clone(),
+                name: display_path(path.strip_prefix(&parent).unwrap()),
                 depth,
                 file: child.file,
                 expanded: true,
@@ -121,9 +136,8 @@ impl FileTreeState {
         self.query = query.into();
         self.matches.clear();
         for (index, node) in self.nodes.iter_mut().enumerate() {
-            let name = display_path(node.path.file_name().unwrap_or_default().as_ref());
             node.matched_indices = if node.file.is_some() {
-                filename_matches(&name, query)
+                filename_matches(&node.name, query)
             } else {
                 Vec::new()
             };
@@ -264,7 +278,6 @@ impl FileTreeState {
             .enumerate()
             .map(|(row, i)| {
                 let node = &self.nodes[*i];
-                let name = display_path(node.path.file_name().unwrap_or_default().as_ref());
                 let indent = "  ".repeat(node.depth);
                 let (marker, color) = if let Some(index) = node.file {
                     let status = files[index].status;
@@ -289,7 +302,7 @@ impl FileTreeState {
                     Span::styled(marker, Style::default().fg(color)),
                 ];
                 spans.extend(
-                    highlight_matched_text(vec![Span::raw(name)])
+                    highlight_matched_text(vec![Span::raw(node.name.clone())])
                         .matched_indices(node.matched_indices.clone())
                         .not_matched_style(base_style)
                         .matched_style(
@@ -341,6 +354,115 @@ fn filename_matches(name: &str, query: &str) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_directory_keeps_multiple_files_as_separate_children() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let files = [
+            "_docker-compose-global",
+            "_docker-compose-local",
+            "_docker-exec-shell",
+        ]
+        .map(|name| ChangedFile {
+            status: 'M',
+            path: format!("custom/plugins/docker/functions/{name}").into(),
+            old_path: None,
+        });
+        let mut tree = FileTreeState::new(&files);
+        assert_eq!(tree.nodes.len(), 4);
+        assert_eq!(tree.nodes[0].name, "custom/plugins/docker/functions");
+        assert_eq!(
+            tree.nodes[0].path,
+            PathBuf::from("custom/plugins/docker/functions")
+        );
+        assert_eq!(tree.nodes[0].depth, 0);
+        assert!(tree.nodes[1..].iter().all(|node| node.depth == 1));
+        let mut terminal = Terminal::new(TestBackend::new(70, 8)).unwrap();
+        terminal
+            .draw(|frame| {
+                tree.render(
+                    frame,
+                    frame.area(),
+                    Block::bordered(),
+                    &files,
+                    &ColorTheme::default(),
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        for (row, expected) in [
+            (1, "▾ custom/plugins/docker/functions"),
+            (2, "  M _docker-compose-global"),
+            (3, "  M _docker-compose-local"),
+            (4, "  M _docker-exec-shell"),
+        ] {
+            let rendered: String = (1..69).map(|x| buffer[(x, row)].symbol()).collect();
+            assert!(rendered.starts_with(expected), "{rendered:?}");
+        }
+        tree.first();
+        assert_eq!(tree.activate(), None);
+        assert_eq!(tree.visible.len(), 1);
+        assert_eq!(tree.activate(), None);
+        assert_eq!(tree.visible.len(), 4);
+        tree.last();
+        assert_eq!(tree.activate(), Some(2));
+        tree.collapse();
+        assert_eq!(tree.list.selected(), Some(0));
+    }
+
+    #[test]
+    fn compact_directories_stop_at_files_and_branch_points() {
+        let files = [
+            "src/shared/deep/a.rs",
+            "src/shared/other/b.rs",
+            "mixed/a.rs",
+            "mixed/nested/b.rs",
+        ]
+        .map(|path| ChangedFile {
+            status: 'M',
+            path: path.into(),
+            old_path: None,
+        });
+        let tree = FileTreeState::new(&files);
+        let directories: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter(|node| node.file.is_none())
+            .map(|node| (node.name.as_str(), node.depth))
+            .collect();
+        assert_eq!(
+            directories,
+            vec![
+                ("mixed", 0),
+                ("nested", 1),
+                ("src/shared", 0),
+                ("deep", 1),
+                ("other", 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn compact_directory_search_reveals_children_and_preserves_original_file_index() {
+        let files = [ChangedFile {
+            status: 'M',
+            path: "目录/子目录/中文.rs".into(),
+            old_path: None,
+        }];
+        let mut tree = FileTreeState::new(&files);
+        assert_eq!(tree.nodes[0].name, "目录/子目录");
+        assert_eq!(tree.nodes[1].name, "中文.rs");
+        tree.first();
+        tree.activate();
+        assert_eq!(tree.visible.len(), 1);
+        tree.search("中文");
+        assert_eq!(tree.visible.len(), 2);
+        assert_eq!(tree.search_status(), (1, 1));
+        assert_eq!(tree.activate(), Some(0));
+        assert_eq!(files[0].path, tree.nodes[1].path);
+        tree.search("子目录");
+        assert_eq!(tree.search_status(), (0, 0));
+    }
 
     #[test]
     fn collapse_and_expand_preserve_nested_selection() {

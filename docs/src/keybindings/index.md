@@ -43,6 +43,10 @@ The default key bindings can be overridden.
 Press Enter on a commit to open its changed-file tree and patch side by side.
 The original commit detail implementation is retained separately.
 
+Directory chains with no files or branches in the intermediate directories
+appear on one row, such as `custom/plugins/docker/functions`. Files in that
+directory remain separate child rows; branching directories keep their hierarchy.
+
 | Key | Description | Corresponding keybind |
 | --- | --- | --- |
 | <kbd>Tab</kbd> / <kbd>Shift-Tab</kbd> | Toggle full-screen patch / file tree | `ref_list` / `focus_previous` |
