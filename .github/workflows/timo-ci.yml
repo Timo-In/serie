@@ -1,0 +1,111 @@
+name: Timo CI
+
+on:
+  push:
+    branches: [timo/dev, timo/main]
+  pull_request:
+    branches: [timo/dev, timo/main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: timo-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    if: github.repository == 'Timo-In/serie'
+    name: ${{ matrix.os }} / ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            toolchain: stable
+          - os: ubuntu-22.04-arm
+            toolchain: stable
+          - os: macos-15-intel
+            toolchain: stable
+          - os: macos-15
+            toolchain: stable
+          - os: ubuntu-22.04
+            toolchain: msrv
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Resolve Rust version
+        id: rust
+        env:
+          REQUESTED_TOOLCHAIN: ${{ matrix.toolchain }}
+        run: |
+          if [ "$REQUESTED_TOOLCHAIN" = msrv ]; then
+            version=$(sed -n 's/^rust-version = "\([^"]*\)".*/\1/p' Cargo.toml)
+            test -n "$version"
+          else
+            version=stable
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: ${{ steps.rust.outputs.version }}
+          components: rustfmt, clippy
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Build
+        run: cargo build --locked --all-features
+      - name: Test
+        run: cargo test --locked --all-features
+
+  release-tools:
+    if: github.repository == 'Timo-In/serie'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Test release tooling
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Check Go
+        run: go version
+      - name: Check fork workflows
+        env:
+          GOBIN: ${{ runner.temp }}/actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$GOBIN/actionlint" .github/workflows/timo-ci.yml .github/workflows/timo-release.yml
+
+  cargo-test:
+    name: cargo test
+    needs: [checks, release-tools]
+    if: always() && github.repository == 'Timo-In/serie'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all CI checks to pass
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          RELEASE_TOOLS_RESULT: ${{ needs.release-tools.result }}
+        run: |
+          test "$CHECKS_RESULT" = success
+          test "$RELEASE_TOOLS_RESULT" = success

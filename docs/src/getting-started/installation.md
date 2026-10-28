@@ -1,5 +1,20 @@
 # Installation
 
+### Timo fork
+
+After the first fork release, install it from the personal tap:
+
+```sh
+brew install Timo-In/tap/serie-timo
+```
+
+The installed executable is `serie`. This formula conflicts with the upstream
+`serie` package because both provide the same executable. Precompiled macOS
+and Linux binaries for ARM64 and x86-64 are published at
+[Timo-In/serie releases](https://github.com/Timo-In/serie/releases).
+
+The package managers below install the upstream project.
+
 ### [Cargo](https://crates.io/crates/serie)
 
 ```

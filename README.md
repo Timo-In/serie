@@ -42,6 +42,16 @@ For detailed usage, configuration, and advanced features, see [the full document
 
 ## Installation
 
+For this fork, install the `serie-timo` formula after its first release:
+
+```sh
+brew install Timo-In/tap/serie-timo
+```
+
+It provides the `serie` command and conflicts with the upstream `serie` formula.
+Fork releases are available on [Timo-In/serie](https://github.com/Timo-In/serie/releases).
+The following Cargo command installs the upstream version from crates.io.
+
 If you're using Cargo:
 
 ```
@@ -49,6 +59,59 @@ $ cargo install --locked serie
 ```
 
 For other download options, see [Installation](https://lusingander.github.io/serie/getting-started/installation.html).
+
+## Maintaining the Timo fork
+
+`timo/dev` is the development branch; `timo/main` is the default and stable
+release branch. Merge changes between these published branches instead of
+rebasing their shared history. To integrate an upstream update, fetch
+`lusingander/serie` as an `upstream` remote, merge `upstream/master` into
+`timo/dev`, and let CI pass before merging into `timo/main`.
+
+The independent [Timo CI](.github/workflows/timo-ci.yml) checks both branches
+and their pull requests. Its required status check is named **`cargo test`**;
+that check passes only when all platform checks and release-tool tests pass.
+The author workflows remain unchanged. In this fork's Actions settings,
+disable **Build**, **Deny**, **Pinact**, **Deploy GitHub Pages**, and **Release**,
+and keep **Timo CI** and **Timo Release** enabled. In particular, disable the
+inherited Release workflow before pushing a fork release tag, as both release
+workflows otherwise match that tag. If workflows are not listed yet, enable
+Actions for the fork and push the workflow commit first.
+
+Once GitHub lists the workflows, the inherited ones can also be disabled with:
+
+```sh
+for workflow in build.yml deny.yml pinact.yml gh-pages.yml release.yml; do
+  gh workflow disable "$workflow" --repo Timo-In/serie
+done
+```
+
+To release:
+
+1. Set the package version in `Cargo.toml` and `Cargo.lock` to a fork version,
+   such as `0.10.1-timo`. All fork release versions end in `-timo`; use a new
+   version for each release instead of replacing an existing tag.
+2. Push `timo/dev` and merge its pull request into `timo/main` with **Create a
+   merge commit** after `cargo test` passes. Fetch the updated stable branch locally.
+3. Create and push an annotated tag matching the package version:
+
+   ```sh
+   git switch timo/main
+   git pull --ff-only origin timo/main
+   git tag -a v0.10.1-timo -m "release: v0.10.1-timo"
+   git push origin v0.10.1-timo
+   ```
+
+[Timo Release](.github/workflows/timo-release.yml) rejects a tag whose version
+does not match Cargo or whose commit is not contained in `timo/main`. It runs
+CI again, builds macOS and Linux binaries for ARM64 and x86-64, and publishes
+the archives, `SHA256SUMS`, and generated `serie-timo.rb` to GitHub Releases.
+The Linux builds use Ubuntu 22.04 (glibc). The Homebrew job validates the
+formula and tests a macOS ARM64 installation before committing
+`Formula/serie-timo.rb` to `Timo-In/homebrew-tap` using the repository secret
+`HOMEBREW_TAP_GITHUB_TOKEN`. The token needs permission to write that tap's
+contents. A failed Homebrew job can be retried after correcting the token or
+tap configuration; the GitHub Release remains available.
 
 ## Usage
 
