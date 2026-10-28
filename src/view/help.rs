@@ -284,9 +284,12 @@ fn build_lines(
     let (detail_key_lines, detail_value_lines) = build_block_lines("Commit Detail:", detail_helps, color_theme, keybind);
 
     let git_detail_helps = vec![
+        (vec![UserEvent::Search], "Search filenames (ignore-case substring)".into()),
+        (vec![UserEvent::GoToNext, UserEvent::GoToPrevious], "Next/previous matching file".into()),
         (vec![UserEvent::RefList, UserEvent::FocusPrevious], "Toggle full patch / file tree".into()),
-        (vec![UserEvent::Confirm], "Expand/collapse directory or open file in editor".into()),
-        (vec![UserEvent::Cancel, UserEvent::Close], "Return to file tree or commit list".into()),
+        (vec![UserEvent::Confirm], "Confirm search, or expand directory / edit file".into()),
+        (vec![UserEvent::Cancel], "Cancel/clear search, or return to file tree / commit list".into()),
+        (vec![UserEvent::Close], "Return to file tree or commit list (Backspace edits search input)".into()),
         (vec![UserEvent::EditFile], "Edit working-tree file in terminal editor (file tree only)".into()),
         (vec![UserEvent::NavigateDown, UserEvent::NavigateUp], "Select file or scroll patch".into()),
         (vec![UserEvent::NavigateRight, UserEvent::NavigateLeft], "Expand/collapse directory or scroll patch horizontally".into()),

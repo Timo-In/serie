@@ -1,8 +1,9 @@
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
 
+use laurier::highlight::highlight_matched_text;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, List, ListItem, ListState},
     Frame,
@@ -13,12 +14,13 @@ use crate::{
     git::detail::{display_path, ChangedFile},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node {
     path: PathBuf,
     depth: usize,
     file: Option<usize>,
     expanded: bool,
+    matched_indices: Vec<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -27,11 +29,13 @@ struct Branch {
     children: BTreeMap<OsString, Branch>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FileTreeState {
     nodes: Vec<Node>,
     visible: Vec<usize>,
     list: ListState,
+    query: String,
+    matches: Vec<usize>,
 }
 
 impl FileTreeState {
@@ -76,6 +80,7 @@ impl FileTreeState {
                 depth,
                 file: child.file,
                 expanded: true,
+                matched_indices: Vec::new(),
             });
             self.append_branches(child, path, depth + 1);
         }
@@ -106,6 +111,78 @@ impl FileTreeState {
     pub fn selected_file(&self) -> Option<usize> {
         let selected = self.list.selected()?;
         self.nodes[*self.visible.get(selected)?].file
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub fn search(&mut self, query: &str) {
+        self.query = query.into();
+        self.matches.clear();
+        for (index, node) in self.nodes.iter_mut().enumerate() {
+            let name = display_path(node.path.file_name().unwrap_or_default().as_ref());
+            node.matched_indices = if node.file.is_some() {
+                filename_matches(&name, query)
+            } else {
+                Vec::new()
+            };
+            if !node.matched_indices.is_empty() {
+                self.matches.push(index);
+            }
+        }
+        let selected = self.list.selected().map(|i| self.visible[i]).unwrap_or(0);
+        if let Some(&target) = self
+            .matches
+            .iter()
+            .find(|i| **i >= selected)
+            .or(self.matches.first())
+        {
+            self.reveal(target);
+        }
+    }
+
+    fn reveal(&mut self, target: usize) {
+        let path = self.nodes[target].path.clone();
+        for node in &mut self.nodes[..target] {
+            if node.file.is_none() && path.starts_with(&node.path) {
+                node.expanded = true;
+            }
+        }
+        self.rebuild_visible();
+        self.list
+            .select(self.visible.iter().position(|i| *i == target));
+    }
+
+    pub fn next_match(&mut self, forward: bool, count: usize) {
+        let total = self.matches.len();
+        if total == 0 {
+            return;
+        }
+        let selected = self.list.selected().map(|i| self.visible[i]).unwrap_or(0);
+        let steps = count.saturating_sub(1) % total;
+        let next = if forward {
+            let first = self.matches.partition_point(|i| *i <= selected) % total;
+            (first + steps) % total
+        } else {
+            let first = self
+                .matches
+                .partition_point(|i| *i < selected)
+                .checked_sub(1)
+                .unwrap_or(total - 1);
+            (first + total - steps) % total
+        };
+        self.reveal(self.matches[next]);
+    }
+
+    pub fn search_status(&self) -> (usize, usize) {
+        let selected = self.list.selected().map(|i| self.visible[i]);
+        let current = self
+            .matches
+            .iter()
+            .position(|i| Some(*i) == selected)
+            .map_or(0, |i| i + 1);
+        (current, self.matches.len())
     }
 
     pub fn move_selection(&mut self, down: bool, count: usize) {
@@ -184,7 +261,8 @@ impl FileTreeState {
         let items: Vec<ListItem> = self
             .visible
             .iter()
-            .map(|i| {
+            .enumerate()
+            .map(|(row, i)| {
                 let node = &self.nodes[*i];
                 let name = display_path(node.path.file_name().unwrap_or_default().as_ref());
                 let indent = "  ".repeat(node.depth);
@@ -200,24 +278,64 @@ impl FileTreeState {
                 } else {
                     (if node.expanded { "▾ " } else { "▸ " }.into(), theme.fg)
                 };
-                ListItem::new(Line::from(vec![
+                let selected = self.list.selected() == Some(row);
+                let base_style = Style::default().fg(if selected {
+                    theme.list_selected_fg
+                } else {
+                    theme.list_subject_fg
+                });
+                let mut spans = vec![
                     Span::raw(indent),
                     Span::styled(marker, Style::default().fg(color)),
-                    Span::raw(name),
-                ]))
+                ];
+                spans.extend(
+                    highlight_matched_text(vec![Span::raw(name)])
+                        .matched_indices(node.matched_indices.clone())
+                        .not_matched_style(base_style)
+                        .matched_style(
+                            Style::default()
+                                .fg(theme.list_match_fg)
+                                .bg(theme.list_match_bg),
+                        )
+                        .into_spans(),
+                );
+                let mut line = Line::from(spans);
+                if selected {
+                    line = line.style(
+                        Style::default()
+                            .fg(theme.list_selected_fg)
+                            .bg(theme.list_selected_bg),
+                    );
+                }
+                ListItem::new(line)
             })
             .collect();
         let list = List::new(items)
             .block(block)
-            .style(Style::default().fg(theme.fg))
-            .highlight_style(
-                Style::default()
-                    .fg(theme.list_selected_fg)
-                    .bg(theme.list_selected_bg)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .style(Style::default().fg(theme.fg));
         frame.render_stateful_widget(list, area, &mut self.list);
     }
+}
+
+fn filename_matches(name: &str, query: &str) -> Vec<usize> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut folded = String::new();
+    let mut original = Vec::new();
+    for (index, c) in name.char_indices() {
+        let lower = c.to_lowercase().collect::<String>();
+        original.extend(std::iter::repeat_n((index, c.len_utf8()), lower.len()));
+        folded.push_str(&lower);
+    }
+    let mut indices = Vec::new();
+    for (start, matched) in folded.match_indices(&query.to_lowercase()) {
+        let (end, width) = original[start + matched.len() - 1];
+        indices.extend(original[start].0..end + width);
+    }
+    indices.sort_unstable();
+    indices.dedup();
+    indices
 }
 
 #[cfg(test)]
@@ -299,9 +417,80 @@ mod tests {
                 .unwrap();
             if width == 40 {
                 let buffer = terminal.backend().buffer();
-                assert_eq!(buffer[(3, 2)].fg, theme.list_selected_fg);
-                assert_eq!(buffer[(3, 2)].bg, theme.list_selected_bg);
+                assert_eq!(buffer[(5, 2)].fg, theme.list_selected_fg);
+                assert_eq!(buffer[(5, 2)].bg, theme.list_selected_bg);
+                assert_eq!(buffer[(35, 2)].bg, theme.list_selected_bg);
+                assert!(!buffer[(5, 2)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::BOLD));
             }
         }
+    }
+
+    #[test]
+    fn filename_search_reveals_collapsed_matches_and_wraps() {
+        let files = ["src/first.rs", "tests/first.rs", "first/other.txt"].map(|path| ChangedFile {
+            status: 'M',
+            path: path.into(),
+            old_path: None,
+        });
+        let mut tree = FileTreeState::new(&files);
+        tree.first();
+        tree.activate();
+        tree.search("FIRST");
+        assert_eq!(tree.search_status(), (1, 2));
+        assert_eq!(tree.selected_file(), Some(0));
+        tree.next_match(true, 1);
+        assert_eq!(tree.search_status(), (2, 2));
+        assert_eq!(tree.selected_file(), Some(1));
+        tree.next_match(true, 1);
+        assert_eq!(tree.selected_file(), Some(0));
+        tree.next_match(false, 1);
+        assert_eq!(tree.selected_file(), Some(1));
+        tree.next_match(true, usize::MAX);
+        assert_eq!(tree.selected_file(), Some(0));
+        tree.search("not-a-file");
+        assert_eq!(tree.search_status(), (0, 0));
+        tree.next_match(true, 1);
+        assert_eq!(tree.selected_file(), Some(0));
+        tree.search("");
+        assert!(tree
+            .nodes
+            .iter()
+            .all(|node| node.matched_indices.is_empty()));
+        let mut empty = FileTreeState::new(&[]);
+        empty.search("file");
+        empty.next_match(false, 1);
+        assert_eq!(empty.selected_file(), None);
+    }
+
+    #[test]
+    fn filename_matches_preserve_utf8_boundaries_during_case_folding() {
+        assert_eq!(filename_matches("中文.rs", "文"), vec![3, 4, 5]);
+        assert_eq!(filename_matches("İ.rs", "i"), vec![0, 1]);
+        assert_eq!(filename_matches("İİ.rs", "i"), vec![0, 1, 2, 3]);
+        assert_eq!(filename_matches("First.rs", "FIRST"), vec![0, 1, 2, 3, 4]);
+        assert!(filename_matches("first.rs", "").is_empty());
+    }
+
+    #[test]
+    fn search_highlights_selected_unicode_filename_with_serie_match_colors() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let files = [ChangedFile {
+            status: 'A',
+            path: "中文.rs".into(),
+            old_path: None,
+        }];
+        let theme = ColorTheme::default();
+        let mut tree = FileTreeState::new(&files);
+        tree.search("文");
+        let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
+        terminal
+            .draw(|frame| tree.render(frame, frame.area(), Block::bordered(), &files, &theme))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(3, 1)].fg, theme.list_selected_fg);
+        assert_eq!(buffer[(5, 1)].fg, theme.list_match_fg);
+        assert_eq!(buffer[(5, 1)].bg, theme.list_match_bg);
     }
 }

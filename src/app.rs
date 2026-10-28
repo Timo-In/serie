@@ -224,10 +224,10 @@ impl App<'_> {
                             self.app_status.numeric_prefix.clear();
                         }
                         None => {
-                            if let StatusLine::Input { .. } = self.app_status.status_line {
-                                // In input mode, pass all key events to the view
-                                // fixme: currently, the only thing that processes key_event is searching the list,
-                                //        so this probably works, but it's not the right process...
+                            if matches!(self.app_status.status_line, StatusLine::Input { .. })
+                                || matches!(&self.view, View::GitDetail(view) if view.is_searching())
+                            {
+                                // Input can begin before its queued status-line event is processed.
                                 self.app_status.numeric_prefix.clear();
                                 self.view.handle_event(
                                     UserEventWithCount::from_event(UserEvent::Unknown),

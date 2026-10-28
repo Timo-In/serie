@@ -49,6 +49,8 @@ The original commit detail implementation is retained separately.
 | <kbd>Enter</kbd> | Expand/collapse the selected directory or open the selected file in the editor | `confirm` |
 | <kbd>Esc</kbd> / <kbd>Backspace</kbd> | Return from full-screen patch to the file tree, or back to the commit list | `cancel` / `close` |
 | <kbd>e</kbd> | Edit the selected working-tree file (file tree only) | `edit_file` |
+| <kbd>/</kbd> | Search filenames in the file tree | `search` |
+| <kbd>n/N</kbd> | Go to the next/previous matching file | `go_to_next` / `go_to_previous` |
 | <kbd>j/k</kbd> / <kbd>Down/Up</kbd> | Select a file or scroll the patch | `navigate_down` / `navigate_up` |
 | <kbd>h/l</kbd> / <kbd>Left/Right</kbd> | Collapse/expand a directory or scroll the patch horizontally | `navigate_left` / `navigate_right` |
 | <kbd>Ctrl-f/b</kbd> / <kbd>PageDown/PageUp</kbd> | Move one page | `page_down` / `page_up` |
@@ -67,6 +69,15 @@ Git's binary-file summary.
 
 Tab shows only the selected file's patch at full width. Enter and e have no
 effect in this full-screen view. Tab or Esc restores the file tree.
+
+In the file tree, / starts an incremental, case-insensitive substring search of
+filenames only. The complete tree stays visible; matching filenames are
+highlighted and their parent directories open automatically as you navigate to
+them. Enter confirms the search without opening the editor. n/N cycles through
+matches. While typing, Esc restores the selection, folding, and search that
+were active before input began. After confirming, Esc clears the search before
+another Esc returns to the commit list. Backspace edits the query while typing.
+No matches leave the current selection intact and display a status message.
 
 In the file tree, Enter on a directory toggles its children; Enter on a file
 and e both open the working-tree file for editing. Its contents may differ from

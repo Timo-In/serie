@@ -1,13 +1,14 @@
 use std::{collections::HashMap, rc::Rc};
 
 use ratatui::{
-    crossterm::event::KeyEvent,
+    crossterm::event::{Event, KeyEvent},
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
-    text::Line,
+    style::Style,
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use tui_input::{backend::crossterm::EventHandler, Input};
 
 use crate::{
     app::AppContext,
@@ -65,6 +66,34 @@ impl PanelState {
     }
 }
 
+#[derive(Debug, Default)]
+struct FileSearchState {
+    input: Input,
+    before: Option<FileTreeState>,
+}
+
+impl FileSearchState {
+    fn start(&mut self, tree: &FileTreeState) {
+        self.input = Input::new(tree.query().into());
+        self.before = Some(tree.clone());
+    }
+
+    fn handle_input(&mut self, event: UserEvent, key: KeyEvent, tree: &mut FileTreeState) {
+        match event {
+            UserEvent::Confirm => self.before = None,
+            UserEvent::Cancel => {
+                if let Some(before) = self.before.take() {
+                    *tree = before;
+                }
+            }
+            _ => {
+                self.input.handle_event(&Event::Key(key));
+                tree.search(self.input.value());
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct GitDetailView<'a> {
     commit_list_state: Option<CommitListState<'a>>,
@@ -72,6 +101,7 @@ pub struct GitDetailView<'a> {
     commit: Commit,
     files: Vec<ChangedFile>,
     tree: FileTreeState,
+    search: FileSearchState,
     panels: PanelState,
     patches: HashMap<usize, Vec<Line<'static>>>,
     selected_file: Option<usize>,
@@ -96,6 +126,7 @@ impl<'a> GitDetailView<'a> {
             commit,
             files: Vec::new(),
             tree: FileTreeState::default(),
+            search: FileSearchState::default(),
             panels: PanelState::default(),
             patches: HashMap::new(),
             selected_file: None,
@@ -115,6 +146,7 @@ impl<'a> GitDetailView<'a> {
                 Vec::new()
             });
         self.tree = FileTreeState::new(&self.files);
+        self.search = FileSearchState::default();
         self.patches.clear();
         self.selected_file = None;
         self.update_patch();
@@ -167,8 +199,68 @@ impl<'a> GitDetailView<'a> {
         }
     }
 
-    pub fn handle_event(&mut self, event: UserEventWithCount, _: KeyEvent) {
+    pub fn is_searching(&self) -> bool {
+        self.search.before.is_some()
+    }
+
+    fn update_search_status(&self) {
+        let (current, total) = self.tree.search_status();
+        if self.is_searching() {
+            let value = self.search.input.value();
+            let cursor = value
+                .char_indices()
+                .nth(self.search.input.cursor())
+                .map_or(value.len(), |(index, _)| index)
+                + 1;
+            self.tx.send(AppEvent::UpdateStatusInput {
+                message: format!("/{value}"),
+                cursor_byte_index: cursor,
+                metadata: if total == 0 && !value.is_empty() {
+                    "[filename] No matches".into()
+                } else {
+                    format!("[filename] {current}/{total}")
+                },
+            });
+        } else if !self.tree.query().is_empty() {
+            let message = if total == 0 {
+                format!("No files match {:?}", self.tree.query())
+            } else {
+                format!(
+                    "File match {current} of {total} (query: {:?})",
+                    self.tree.query()
+                )
+            };
+            self.tx.send(AppEvent::UpdateSearchResult {
+                message,
+                options: "[filename] [ignore-case] [substring]".into(),
+                matched: total > 0,
+            });
+        } else {
+            self.tx.send(AppEvent::ClearStatusLine);
+        }
+    }
+
+    pub fn handle_event(&mut self, event: UserEventWithCount, key: KeyEvent) {
+        if self.is_searching() {
+            self.search.handle_input(event.event, key, &mut self.tree);
+            self.update_patch();
+            self.update_search_status();
+            return;
+        }
         match event.event {
+            UserEvent::Search if !self.panels.fullscreen_patch => {
+                self.search.start(&self.tree);
+                self.update_search_status();
+            }
+            UserEvent::GoToNext | UserEvent::GoToPrevious if !self.panels.fullscreen_patch => {
+                self.tree
+                    .next_match(event.event == UserEvent::GoToNext, event.count);
+                self.update_search_status();
+            }
+            UserEvent::Cancel if !self.panels.fullscreen_patch && !self.tree.query().is_empty() => {
+                self.tree.search("");
+                self.update_search_status();
+            }
             UserEvent::RefList | UserEvent::FocusPrevious => self.panels.switch(),
             UserEvent::Confirm
                 if !self.panels.fullscreen_patch && self.tree.activate().is_some() =>
@@ -259,12 +351,7 @@ impl<'a> GitDetailView<'a> {
             Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(area);
         let (files_area, patch_area) = self.panels.areas(content);
         if let Some(area) = files_area {
-            let title = format!(
-                " Files · {} {} ",
-                self.commit.commit_hash.as_short_hash(),
-                self.commit.subject
-            );
-            let block = self.block(title, Panel::Files);
+            let block = self.block(files_title(&self.commit, &self.ctx.color_theme));
             self.panels.height = block.inner(area).height as usize;
             self.tree
                 .render(frame, area, block, &self.files, &self.ctx.color_theme);
@@ -285,7 +372,7 @@ impl<'a> GitDetailView<'a> {
                     }
                 })
                 .unwrap_or_default();
-            let block = self.block(format!(" Patch · {name} "), Panel::Patch);
+            let block = self.block(Line::from(format!(" Patch · {name} ")));
             let inner = block.inner(area);
             self.panels.height = inner.height as usize;
             self.panels.width = inner.width as usize;
@@ -319,29 +406,42 @@ impl<'a> GitDetailView<'a> {
                 area,
             );
         }
-        let help = if self.panels.fullscreen_patch {
-            " Tab/Esc: file tree  j/k: scroll  h/l: horizontal scroll "
+        let help = if self.is_searching() {
+            footer_line(
+                &[("Enter", "confirm search"), ("Esc", "cancel search")],
+                &self.ctx.color_theme,
+            )
+        } else if self.panels.fullscreen_patch {
+            footer_line(
+                &[
+                    ("Tab/Esc", "file tree"),
+                    ("j/k", "scroll"),
+                    ("h/l", "horizontal scroll"),
+                ],
+                &self.ctx.color_theme,
+            )
         } else {
-            " Tab: full patch  Enter: expand / edit file  e: edit file  Esc: back "
+            footer_line(
+                &[
+                    ("/", "find file"),
+                    ("n/N", "next/previous"),
+                    ("Tab", "full patch"),
+                    ("Enter", "expand / edit file"),
+                    ("e", "edit file"),
+                    ("Esc", "back"),
+                ],
+                &self.ctx.color_theme,
+            )
         };
-        frame.render_widget(
-            Paragraph::new(help).style(Style::default().fg(self.ctx.color_theme.status_info_fg)),
-            footer,
-        );
+        frame.render_widget(Paragraph::new(help), footer);
     }
 
-    fn block(&self, title: String, panel: Panel) -> Block<'static> {
-        let style = if self.panels.focused == panel {
-            Style::default()
-                .fg(self.ctx.color_theme.status_info_fg)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(self.ctx.color_theme.divider_fg)
-        };
+    fn block(&self, title: Line<'static>) -> Block<'static> {
         Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(style)
+            .title_style(Style::default().fg(self.ctx.color_theme.fg))
+            .border_style(Style::default().fg(self.ctx.color_theme.divider_fg))
     }
 
     pub fn selected_file(&self) -> Option<&ChangedFile> {
@@ -383,6 +483,35 @@ impl<'a> GitDetailView<'a> {
                 list_context,
             }));
     }
+}
+
+fn files_title(commit: &Commit, theme: &ColorTheme) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" Files · ", Style::default().fg(theme.fg)),
+        Span::styled(
+            commit.commit_hash.as_short_hash().to_string(),
+            Style::default().fg(theme.list_hash_fg),
+        ),
+        Span::styled(
+            format!(" {} ", commit.subject),
+            Style::default().fg(theme.list_subject_fg),
+        ),
+    ])
+}
+
+fn footer_line(items: &[(&str, &str)], theme: &ColorTheme) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    for (key, description) in items {
+        spans.push(Span::styled(
+            (*key).to_string(),
+            Style::default().fg(theme.help_key_fg),
+        ));
+        spans.push(Span::styled(
+            format!(": {description}  "),
+            Style::default().fg(theme.status_input_transient_fg),
+        ));
+    }
+    Line::from(spans)
 }
 
 fn build_patch_lines(patch: &str, theme: &ColorTheme, tab_width: usize) -> Vec<Line<'static>> {
@@ -429,6 +558,69 @@ fn build_patch_lines(patch: &str, theme: &ColorTheme, tab_width: usize) -> Vec<L
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_input_confirms_without_activating_and_escape_restores_tree() {
+        use ratatui::crossterm::event::KeyCode;
+        let files = ["src/a.rs", "tests/first.rs", "tests/中文.rs"].map(|path| ChangedFile {
+            status: 'M',
+            path: path.into(),
+            old_path: None,
+        });
+        let mut tree = FileTreeState::new(&files);
+        tree.first();
+        tree.activate();
+        let original = format!("{tree:?}");
+        let mut search = FileSearchState::default();
+        search.start(&tree);
+        for c in "FIRST".chars() {
+            search.handle_input(UserEvent::Unknown, KeyCode::Char(c).into(), &mut tree);
+        }
+        assert_eq!(tree.selected_file(), Some(1));
+        search.handle_input(UserEvent::Cancel, KeyCode::Esc.into(), &mut tree);
+        assert!(search.before.is_none());
+        assert_eq!(format!("{tree:?}"), original);
+        search.start(&tree);
+        for c in "中文".chars() {
+            search.handle_input(UserEvent::Unknown, KeyCode::Char(c).into(), &mut tree);
+        }
+        search.handle_input(UserEvent::Confirm, KeyCode::Enter.into(), &mut tree);
+        assert!(search.before.is_none());
+        assert_eq!(tree.query(), "中文");
+        assert_eq!(tree.selected_file(), Some(2));
+        search.start(&tree);
+        search.handle_input(UserEvent::Close, KeyCode::Backspace.into(), &mut tree);
+        assert_eq!(tree.query(), "中");
+        search.handle_input(UserEvent::Cancel, KeyCode::Esc.into(), &mut tree);
+        assert_eq!(tree.query(), "中文");
+    }
+
+    #[test]
+    fn title_and_footer_follow_existing_list_theme_roles() {
+        use ratatui::style::{Color, Modifier};
+        let theme = ColorTheme {
+            list_hash_fg: Color::Red,
+            list_subject_fg: Color::Blue,
+            help_key_fg: Color::Green,
+            status_input_transient_fg: Color::Gray,
+            ..ColorTheme::default()
+        };
+        let commit = Commit {
+            commit_hash: "1234567890".into(),
+            subject: "subject".into(),
+            ..Commit::default()
+        };
+        let title = files_title(&commit, &theme);
+        assert_eq!(title.spans[1].style.fg, Some(Color::Red));
+        assert_eq!(title.spans[2].style.fg, Some(Color::Blue));
+        let footer = footer_line(&[("/", "find file")], &theme);
+        assert_eq!(footer.spans[1].style.fg, Some(Color::Green));
+        assert_eq!(footer.spans[2].style.fg, Some(Color::Gray));
+        assert!(title
+            .spans
+            .iter()
+            .all(|span| !span.style.add_modifier.contains(Modifier::BOLD)));
+    }
 
     #[test]
     fn patch_uses_serie_theme_and_escapes_control_characters() {
