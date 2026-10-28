@@ -562,7 +562,12 @@ mod tests {
     #[test]
     fn search_input_confirms_without_activating_and_escape_restores_tree() {
         use ratatui::crossterm::event::KeyCode;
-        let files = ["src/a.rs", "tests/first.rs", "tests/中文.rs"].map(|path| ChangedFile {
+        let files = [
+            "src/deep/a.rs",
+            "tests/nested/first.rs",
+            "tests/nested/中文.rs",
+        ]
+        .map(|path| ChangedFile {
             status: 'M',
             path: path.into(),
             old_path: None,
