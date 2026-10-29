@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "serie"
-version = "0.10.1-timo"
+version = "0.10.1-timo.1"
 dependencies = [
  "ansi-to-tui",
  "arboard",

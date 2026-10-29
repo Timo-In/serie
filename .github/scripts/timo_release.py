@@ -21,8 +21,10 @@ ALL_TARGETS = tuple(target for targets in TARGETS.values() for target in targets
 def release_version(root=ROOT):
     with (root / "Cargo.toml").open("rb") as stream:
         version = tomllib.load(stream)["package"]["version"]
-    if not re.fullmatch(r"\d+\.\d+\.\d+-timo", version):
-        raise ValueError(f"Expected a fork version such as 0.10.1-timo, got {version!r}")
+    if not re.fullmatch(r"\d+\.\d+\.\d+-timo(?:\.[1-9]\d*)?", version):
+        raise ValueError(
+            f"Expected a fork version such as 0.10.1-timo or 0.10.1-timo.1, got {version!r}"
+        )
     return version
 
 
