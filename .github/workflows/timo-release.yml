@@ -2,7 +2,7 @@ name: Timo Release
 
 on:
   push:
-    tags: ['v*-timo']
+    tags: ['v*-timo', 'v*-timo.*']
 
 permissions:
   contents: read

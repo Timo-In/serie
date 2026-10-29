@@ -89,8 +89,10 @@ done
 To release:
 
 1. Set the package version in `Cargo.toml` and `Cargo.lock` to a fork version,
-   such as `0.10.1-timo`. All fork release versions end in `-timo`; use a new
-   version for each release instead of replacing an existing tag.
+   such as `0.10.1-timo` or `0.10.1-timo.1`. Both the initial `-timo` suffix and
+   numeric revisions (`-timo.1`, `-timo.2`, ...) are supported. Increment the
+   revision for fork updates on the same upstream version. The tag must exactly
+   match the package version, prefixed with `v`; do not reuse a published tag.
 2. Push `timo/dev`, then [create a PR within this fork](https://github.com/Timo-In/serie/compare/timo%2Fmain...timo%2Fdev?expand=1)
    or run `gh pr create --repo Timo-In/serie --base timo/main --head timo/dev` to open the same PR.
    Choose **Create a merge commit** after `cargo test` passes, then fetch the updated stable branch locally.
@@ -99,8 +101,8 @@ To release:
    ```sh
    git switch timo/main
    git pull --ff-only origin timo/main
-   git tag -a v0.10.1-timo -m "release: v0.10.1-timo"
-   git push origin v0.10.1-timo
+   git tag -a v0.10.1-timo.1 -m "release: v0.10.1-timo.1"
+   git push origin v0.10.1-timo.1
    ```
 
 [Timo Release](.github/workflows/timo-release.yml) rejects a tag whose version

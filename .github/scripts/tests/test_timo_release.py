@@ -11,7 +11,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "timo_release.py"
 SPEC = importlib.util.spec_from_file_location("timo_release", SCRIPT)
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
-VERSION = "0.10.1-timo"
+VERSION = "0.10.1-timo.1"
 
 
 class ReleaseTests(unittest.TestCase):
@@ -38,6 +38,18 @@ class ReleaseTests(unittest.TestCase):
         (self.root / "Cargo.toml").write_text('[package]\nversion = "0.10.1"\n')
         with self.assertRaises(ValueError):
             release.release_version(self.root)
+
+    def test_fork_versions_support_optional_numeric_revisions(self):
+        for version in ["0.10.1-timo", "0.10.1-timo.1", "0.10.1-timo.2", "0.10.1-timo.10", "0.11.0-timo.1"]:
+            with self.subTest(version=version):
+                (self.root / "Cargo.toml").write_text(f'[package]\nversion = "{version}"\n')
+                self.assertEqual(release.release_version(self.root), version)
+                release.validate_tag(f"v{version}", version)
+        for version in ["0.10.1", "0.10.1-timo.", "0.10.1-timo.foo", "0.10.1-timo.01", "0.10.1-timo.1.2"]:
+            with self.subTest(version=version):
+                (self.root / "Cargo.toml").write_text(f'[package]\nversion = "{version}"\n')
+                with self.assertRaises(ValueError):
+                    release.release_version(self.root)
 
     def test_archive_has_executable_license_and_reproducible_metadata(self):
         target = release.ALL_TARGETS[0]
